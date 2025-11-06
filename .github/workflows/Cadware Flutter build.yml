@@ -20,7 +20,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.19.x"
+          flutter-version: "3.24.4"
           channel: "stable"
 
       - name: Enable Windows desktop
@@ -48,4 +48,28 @@ jobs:
         run: |
           echo "RENDEZVOUS_SERVER=${RENDEZVOUS_SERVER}"
           echo "RELAY_SERVER=${RELAY_SERVER}"
-          echo "RS_PUB_KEY set? $([[ -n "$RS_PUB_KEY" ]] && e
+          echo "RS_PUB_KEY set? $([[ -n "$RS_PUB_KEY" ]] && echo yes || echo no)"
+
+      - name: Install Flutter dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build Windows (Release)
+        working-directory: flutter
+        run: flutter build windows --release --verbose
+
+      - name: Package ZIP
+        shell: pwsh
+        run: |
+          $APPDIR="flutter/build/windows/x64/runner/Release"
+          if (-not (Test-Path $APPDIR)) { Get-ChildItem -Recurse flutter/build | Select-Object -Last 200; exit 1 }
+          $ART="cadware-rustdesk-windows-${{ github.run_id }}.zip"
+          Compress-Archive -Path "$APPDIR/*" -DestinationPath "$ART"
+          Write-Host "Created $ART"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cadware-rustdesk-windows
+          path: cadware-rustdesk-windows-*.zip
+          if-no-files-found: error
