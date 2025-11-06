@@ -1,20 +1,22 @@
-name: RustDesk Windows Build (Flutter)
+name: Cadware Flutter build.yml
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
-
-    env:
-      RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
-      RELAY_SERVER: ${{ secrets.RELAY_SERVER }}
-      RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+    name: windows-x64
+    runs-on: windows-2022
 
     steps:
-      - name: Checkout
+      - name: Checkout (incl. submodules)
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Enable long paths (git)
+        run: git config --system core.longpaths true
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -22,39 +24,52 @@ jobs:
           flutter-version: "3.19.x"
           channel: "stable"
 
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
       - name: Setup Rust (MSVC)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Create artifact name from domain
-        id: namegen
-        shell: pwsh
+      # (optioneel) meer debug in logs
+      - name: Show versions
         run: |
-          $domain = "${{ env.RENDEZVOUS_SERVER }}"
-          $domain = $domain.ToLower() -replace '^https?://','' -replace ':[0-9]+$',''
-          $safe = $domain -replace '\.+','-' -replace '[^a-z0-9\-]',''
-          if ([string]::IsNullOrWhiteSpace($safe)) { $safe = "unknown-domain" }
-          $art = "rustdesk-windows-$safe-${{ github.run_number }}.zip"
-          "ARTIFACT_NAME=$art" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Artifact name: $art"
+          flutter --version
+          dart --version
+          rustc -Vv
+          cargo -V
 
-      - name: Install Flutter dependencies
+      # Secrets voor jouw servers (optioneel; laat staan als je ze hebt gezet)
+      - name: Inject server env (for build-time)
+        shell: bash
+        env:
+          RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+          RELAY_SERVER: ${{ secrets.RELAY_SERVER }}
+          RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+        run: |
+          echo "RENDEZVOUS_SERVER=${RENDEZVOUS_SERVER}"
+          echo "RELAY_SERVER=${RELAY_SERVER}"
+          echo "RS_PUB_KEY is set? $([[ -n "$RS_PUB_KEY" ]] && echo yes || echo no)"
+
+      - name: Flutter pub get
         run: flutter pub get
 
       - name: Build Windows (Release)
-        run: flutter build windows --release
+        run: flutter build windows --release --verbose
 
-      - name: Package ZIP
+      - name: Package artifact
         shell: pwsh
         run: |
-          $outDir = "build/windows/x64/runner/Release"
-          $zipName = "${{ steps.namegen.outputs.ARTIFACT_NAME }}"
-          Compress-Archive -Path "$outDir/*" -DestinationPath $zipName
-          Write-Host "Created ZIP: $zipName"
+          $APPDIR="build/windows/x64/runner/Release"
+          if (-not (Test-Path $APPDIR)) { Get-ChildItem -Recurse build | Select-Object -Last 100; exit 1 }
+          $ART="cadware-rustdesk-windows-${{ github.run_id }}.zip"
+          Compress-Archive -Path "$APPDIR/*" -DestinationPath "$ART"
+          Write-Host "Created $ART"
 
-      - name: Upload Artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rustdesk-windows
-          path: ${{ steps.namegen.outputs.ARTIFACT_NAME }}
+          name: cadware-rustdesk-windows
+          path: cadware-rustdesk-windows-*.zip
+          if-no-files-found: error
