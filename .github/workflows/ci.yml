@@ -33,124 +33,130 @@ jobs:
           - { target: i686-pc-windows-msvc, os: windows-2022 }
           - { target: x86_64-pc-windows-msvc, os: windows-2022 }
 
-    steps:
-    - name: Export GitHub Actions cache environment variables
-      uses: actions/github-script@v6
-      with:
-        script: |
-          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+  steps:
+  - name: Export GitHub Actions cache environment variables
+    uses: actions/github-script@v6
+    with:
+      script: |
+        core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+        core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+   
+  - name: Checkout repository (with full git metadata)
+    uses: actions/checkout@v4
+    with:
+      fetch-depth: 0
+      submodules: recursive
 
-    - name: Checkout repository (with full git metadata)
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        submodules: recursive
+  - name: Setup vcpkg with GitHub Actions binary cache
+    uses: lukka/run-vcpkg@v11
+    with:
+      vcpkgDirectory: ${{ env.VCPKG_ROOT }}
+      vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
-    - name: Setup vcpkg with GitHub Actions binary cache
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgDirectory: ${{ env.VCPKG_ROOT }}
-        vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+  - name: Update vcpkg repository baseline (only if git present)
+    shell: pwsh
+    run: |
+     if (Test-Path "$env:VCPKG_ROOT\.git") {
+        Write-Host "VCPKG_ROOT is a git repo; updating baseline"
+        Push-Location $env:VCPKG_ROOT
+        git fetch --all --tags --prune
+        git reset --hard origin/HEAD || Write-Host "reset failed, continuing"
+        Pop-Location
+      } else {
+       Write-Host "Skipping vcpkg git update: $env:VCPKG_ROOT is not a git repo"
+      }
 
-    - name: Update vcpkg repository baseline (only if git present)
-      shell: pwsh
-      run: |
-        if (Test-Path "$env:VCPKG_ROOT\.git") {
-          Write-Host "VCPKG_ROOT is a git repo; updating baseline"
-          Push-Location $env:VCPKG_ROOT
-          git fetch --all --tags --prune
-          git reset --hard origin/HEAD || Write-Host "reset failed, continuing"
-          Pop-Location
-        } else {
-          Write-Host "Skipping vcpkg git update: $env:VCPKG_ROOT is not a git repo"
-        }
+  - name: Install vcpkg dependencies (Windows)
+    if: startsWith(matrix.job.os, 'windows')
+    shell: pwsh
+    env:
+      VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
+    run: |
+      $target = '${{ matrix.job.target }}'
+      switch ($target) {
+        'i686-pc-windows-msvc' { $triplet = 'x86-windows-static' }
+        'x86_64-pc-windows-msvc' { $triplet = 'x64-windows-static' }
+        default { $triplet = 'x64-windows' }
+      }
+      Write-Host "Using VCPKG_ROOT=$env:VCPKG_ROOT; installing for triplet=$triplet"
+      # prefer vcpkg.exe on Windows; fall back to vcpkg script if needed
+      $vcpkgExe = Join-Path $env:VCPKG_ROOT 'vcpkg.exe'
+      if (-not (Test-Path $vcpkgExe)) { $vcpkgExe = Join-Path $env:VCPKG_ROOT 'vcpkg' }
+      Write-Host "vcpkg command: $vcpkgExe"
+      # install the packages required by the project (at least opus for the failing step)
+      & $vcpkgExe install "opus:$triplet" --recurse
+      & $vcpkgExe integrate install
 
-    - name: Install vcpkg dependencies (Windows)
-      if: startsWith(matrix.job.os, 'windows')
-      shell: pwsh
-      env:
-        VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
-      run: |
-        $target = '${{ matrix.job.target }}'
-        switch ($target) {
-          'i686-pc-windows-msvc' { $triplet = 'x86-windows-static' }
-          'x86_64-pc-windows-msvc' { $triplet = 'x64-windows-static' }
-          default { $triplet = 'x64-windows' }
-        }
-        Write-Host "Using VCPKG_ROOT=$env:VCPKG_ROOT; installing for triplet=$triplet"
-        & "$env:VCPKG_ROOT/vcpkg" install --triplet $triplet
+  - name: Debug vcpkg contents (Windows)
+    if: startsWith(matrix.job.os, 'windows')
+    shell: pwsh
+    env:
+      VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
+    run: |
+     $target = '${{ matrix.job.target }}'
+      switch ($target) {
+        'i686-pc-windows-msvc' { $tripletDir = Join-Path $env:VCPKG_ROOT 'installed/x86-windows-static' }
+        'x86_64-pc-windows-msvc' { $tripletDir = Join-Path $env:VCPKG_ROOT 'installed/x64-windows-static' }
+        default { $tripletDir = Join-Path $env:VCPKG_ROOT 'installed/x64-windows' }
+      }
+      Write-Host "Triplet dir: $tripletDir"
+      if (Test-Path $tripletDir) { Get-ChildItem -Path $tripletDir -Force | Write-Host } else { Write-Host "Triplet dir not found: $tripletDir" }
+      $opusHeader = Join-Path $tripletDir 'include/opus/opus_multistream.h'
+      if (Test-Path $opusHeader) { Write-Host "OK: opus_multistream.h present" } else { Write-Host "ERROR: opus_multistream.h missing"; exit 1 }
 
-    - name: Debug vcpkg contents (Windows)
-      if: startsWith(matrix.job.os, 'windows')
-      shell: pwsh
-      env:
-        VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
-      run: |
-        $target = '${{ matrix.job.target }}'
-        switch ($target) {
-          'i686-pc-windows-msvc' { $tripletDir = Join-Path $env:VCPKG_ROOT 'installed/x86-windows-static' }
-          'x86_64-pc-windows-msvc' { $tripletDir = Join-Path $env:VCPKG_ROOT 'installed/x64-windows-static' }
-          default { $tripletDir = Join-Path $env:VCPKG_ROOT 'installed/x64-windows' }
-        }
-        Write-Host "Triplet dir: $tripletDir"
-        if (Test-Path $tripletDir) { Get-ChildItem -Path $tripletDir -Force | Write-Host } else { Write-Host "Triplet dir not found: $tripletDir" }
-        $opusHeader = Join-Path $tripletDir 'include/opus/opus_multistream.h'
-        if (Test-Path $opusHeader) { Write-Host "OK: opus_multistream.h present" } else { Write-Host "ERROR: opus_multistream.h missing"; exit 1 }
+  - name: Install Rust toolchain
+    uses: dtolnay/rust-toolchain@v1
+    with:
+      toolchain: stable
+      targets: ${{ matrix.job.target }}
+      components: ''
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@v1
-      with:
-        toolchain: stable
-        targets: ${{ matrix.job.target }}
-        components: ''
+  - name: Show version information (Rust, cargo, MSVC toolchain)
+    shell: pwsh
+    run: |
+      rustup -V
+      rustup toolchain list
+      rustup default
+      cargo -V
+      rustc -V
+      if (Get-Command cl -ErrorAction SilentlyContinue) { cl /? | Out-Null } else { Write-Host "MSVC cl.exe not found on PATH" }
 
-    - name: Show version information (Rust, cargo, MSVC toolchain)
-      shell: pwsh
-      run: |
-        rustup -V
-        rustup toolchain list
-        rustup default
-        cargo -V
-        rustc -V
-        if (Get-Command cl -ErrorAction SilentlyContinue) { cl /? | Out-Null } else { Write-Host "MSVC cl.exe not found on PATH" }
+  - name: Use rust cache
+    uses: Swatinem/rust-cache@v2
 
-    - name: Use rust cache
-      uses: Swatinem/rust-cache@v2
+  - name: Build
+    uses: actions-rs/cargo@v1
+    with:
+      use-cross: ${{ matrix.job.use-cross }}
+      command: build
+      args: --locked --target=${{ matrix.job.target }}
 
-    - name: Build
-      uses: actions-rs/cargo@v1
-      with:
-        use-cross: ${{ matrix.job.use-cross }}
-        command: build
-        args: --locked --target=${{ matrix.job.target }}
+  - name: clean
+    shell: pwsh
+    run: |
+      cargo clean
 
-    - name: clean
-      shell: pwsh
-      run: |
-        cargo clean
+  - name: Set testing options
+    id: test-options
+    shell: pwsh
+    run: |
+      $target = '${{ matrix.job.target }}'
+      if ($target -like 'arm-*' -or $target -like 'aarch64-*') {
+        $CARGO_TEST_OPTIONS = "--lib --bin $env:PROJECT_NAME"
+      } else {
+        $CARGO_TEST_OPTIONS = "--workspace --no-fail-fast -- --skip test_get_cursor_pos --skip test_get_key_state"
+      }
+      # export for subsequent steps
+      Add-Content -Path $env:GITHUB_ENV -Value "CARGO_TEST_OPTIONS=$CARGO_TEST_OPTIONS"
+      # set step output so it can be used as steps.test-options.outputs.CARGO_TEST_OPTIONS
+      Add-Content -Path $env:GITHUB_OUTPUT -Value "CARGO_TEST_OPTIONS=$CARGO_TEST_OPTIONS"
 
-    - name: Set testing options
-      id: test-options
-      shell: pwsh
-      run: |
-        $target = '${{ matrix.job.target }}'
-        if ($target -like 'arm-*' -or $target -like 'aarch64-*') {
-          $CARGO_TEST_OPTIONS = "--lib --bin $env:PROJECT_NAME"
-        } else {
-          $CARGO_TEST_OPTIONS = "--workspace --no-fail-fast -- --skip test_get_cursor_pos --skip test_get_key_state"
-        }
-        # export for subsequent steps
-        Add-Content -Path $env:GITHUB_ENV -Value "CARGO_TEST_OPTIONS=$CARGO_TEST_OPTIONS"
-        # set step output so it can be used as steps.test-options.outputs.CARGO_TEST_OPTIONS
-        Add-Content -Path $env:GITHUB_OUTPUT -Value "CARGO_TEST_OPTIONS=$CARGO_TEST_OPTIONS"
-
-    - name: Run tests
-      shell: pwsh
-      run: |
-        $target = '${{ matrix.job.target }}'
-        $opts = '${{ steps.test-options.outputs.CARGO_TEST_OPTIONS }}'
-        Write-Host "Running: cargo test --locked --target=$target $opts"
-        Set-StrictMode -Off
-        # run tests directly to ensure environment interpolation works
-        cargo test --locked --target=$target $opts
+  - name: Run tests
+    shell: pwsh
+    run: |
+      $target = '${{ matrix.job.target }}'
+      $opts = '${{ steps.test-options.outputs.CARGO_TEST_OPTIONS }}'
+      Write-Host "Running: cargo test --locked --target=$target $opts"
+      Set-StrictMode -Off
+      # run tests directly to ensure environment interpolation works
+      cargo test --locked --target=$target $opts
