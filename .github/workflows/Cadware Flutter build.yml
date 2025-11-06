@@ -5,7 +5,6 @@ on:
 
 jobs:
   build:
-    name: windows-x64
     runs-on: windows-2022
 
     steps:
@@ -32,7 +31,6 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      # (optioneel) meer debug in logs
       - name: Show versions
         run: |
           flutter --version
@@ -40,8 +38,8 @@ jobs:
           rustc -Vv
           cargo -V
 
-      # Secrets voor jouw servers (optioneel; laat staan als je ze hebt gezet)
-      - name: Inject server env (for build-time)
+      # (optioneel) je secrets worden doorgegeven als env
+      - name: Echo server env (debug)
         shell: bash
         env:
           RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
@@ -50,26 +48,4 @@ jobs:
         run: |
           echo "RENDEZVOUS_SERVER=${RENDEZVOUS_SERVER}"
           echo "RELAY_SERVER=${RELAY_SERVER}"
-          echo "RS_PUB_KEY is set? $([[ -n "$RS_PUB_KEY" ]] && echo yes || echo no)"
-
-      - name: Flutter pub get
-        run: flutter pub get
-
-      - name: Build Windows (Release)
-        run: flutter build windows --release --verbose
-
-      - name: Package artifact
-        shell: pwsh
-        run: |
-          $APPDIR="build/windows/x64/runner/Release"
-          if (-not (Test-Path $APPDIR)) { Get-ChildItem -Recurse build | Select-Object -Last 100; exit 1 }
-          $ART="cadware-rustdesk-windows-${{ github.run_id }}.zip"
-          Compress-Archive -Path "$APPDIR/*" -DestinationPath "$ART"
-          Write-Host "Created $ART"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: cadware-rustdesk-windows
-          path: cadware-rustdesk-windows-*.zip
-          if-no-files-found: error
+          echo "RS_PUB_KEY set? $([[ -n "$RS_PUB_KEY" ]] && e
