@@ -1,11 +1,16 @@
-name: Cadware Flutter Build (Windows)
+name: RustDesk Windows Build (Flutter)
 
 on:
   workflow_dispatch:
 
 jobs:
-  windows:
+  build:
     runs-on: windows-latest
+
+    env:
+      RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+      RELAY_SERVER: ${{ secrets.RELAY_SERVER }}
+      RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
 
     steps:
       - name: Checkout
@@ -14,7 +19,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.19.x"   # bewezen werkend voor RustDesk desktop
+          flutter-version: "3.19.x"
           channel: "stable"
 
       - name: Setup Rust (MSVC)
@@ -22,47 +27,34 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Cache pub
-        uses: actions/cache@v4
-        with:
-          path: |
-            **/pub-cache
-            ~/.pub-cache
-          key: ${{ runner.os }}-pubcache-${{ hashFiles('**/pubspec.lock') }}
-
-      - name: Configure servers via env (Rendezvous/Relay/PublicKey)
-        shell: bash
-        env:
-          RENDEZVOUS_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
-          RELAY_SERVER: ${{ secrets.RELAY_SERVER }}
-          RS_PUB_KEY: ${{ secrets.RS_PUB_KEY }}
+      - name: Create artifact name from domain
+        id: namegen
+        shell: pwsh
         run: |
-          # Schrijf een local config in de Windows build (Flutter) zodat jouw servers/keys standaard zijn
-          # RustDesk leest deze variabelen in de Flutter UI; de upstream build pakt ze via env.
-          echo "RENDEZVOUS_SERVER=$RENDEZVOUS_SERVER"
-          echo "RELAY_SERVER=$RELAY_SERVER"
-          echo "RS_PUB_KEY=$RS_PUB_KEY"
+          $domain = "${{ env.RENDEZVOUS_SERVER }}"
+          $domain = $domain.ToLower() -replace '^https?://','' -replace ':[0-9]+$',''
+          $safe = $domain -replace '\.+','-' -replace '[^a-z0-9\-]',''
+          if ([string]::IsNullOrWhiteSpace($safe)) { $safe = "unknown-domain" }
+          $art = "rustdesk-windows-$safe-${{ github.run_number }}.zip"
+          "ARTIFACT_NAME=$art" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Artifact name: $art"
 
-      - name: Fetch deps
-        run: |
-          flutter --version
-          flutter pub get
+      - name: Install Flutter dependencies
+        run: flutter pub get
 
       - name: Build Windows (Release)
-        run: |
-          flutter build windows --release
+        run: flutter build windows --release
 
-      - name: Package artifact
+      - name: Package ZIP
+        shell: pwsh
         run: |
-          set -e
-          APPDIR="build/windows/x64/runner/Release"
-          ART="rustdesk-windows-${{ github.run_id }}.zip"
-          powershell Compress-Archive -Path "$APPDIR/*" -DestinationPath "$ART"
-          echo "Created $ART"
+          $outDir = "build/windows/x64/runner/Release"
+          $zipName = "${{ steps.namegen.outputs.ARTIFACT_NAME }}"
+          Compress-Archive -Path "$outDir/*" -DestinationPath $zipName
+          Write-Host "Created ZIP: $zipName"
 
-      - name: Upload artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: rustdesk-windows
-          path: rustdesk-windows-*.zip
-          if-no-files-found: error
+          path: ${{ steps.namegen.outputs.ARTIFACT_NAME }}
