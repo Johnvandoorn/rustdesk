@@ -147,7 +147,7 @@ jobs:
           *) TRIPLET=x64-windows ;;
         esac
         echo "Using VCPKG_ROOT=$VCPKG_ROOT; installing for triplet=$TRIPLET"
-        $VCPKG_ROOT/vcpkg install opus:${TRIPLET} --recurse
+        $VCPKG_ROOT/vcpkg install
 
     - name: Debug
       if: startsWith(matrix.job.os, 'windows')
