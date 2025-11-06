@@ -129,17 +129,41 @@ jobs:
           # arm-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
           # aarch64-unknown-linux-gnu) sudo apt-get -y update ; sudo apt-get -y install gcc-aarch64-linux-gnu ;;
         esac
-
     - name: Setup vcpkg with Github Actions binary cache
       uses: lukka/run-vcpkg@v11
       with:
-        vcpkgDirectory: /opt/artifacts/vcpkg
+        vcpkgDirectory: ${{ github.workspace }}/vcpkg
         vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
     - name: Install vcpkg dependencies
-      run: |
-        $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"
+      if: startsWith(matrix.job.os, 'windows')
       shell: bash
+      env:
+        VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      run: |
+        case "${{ matrix.job.target }}" in
+          i686-pc-windows-msvc) TRIPLET=x86-windows-static ;;
+          x86_64-pc-windows-msvc) TRIPLET=x64-windows-static ;;
+          *) TRIPLET=x64-windows ;;
+        esac
+        echo "Using VCPKG_ROOT=$VCPKG_ROOT; installing for triplet=$TRIPLET"
+        $VCPKG_ROOT/vcpkg install opus:${TRIPLET} --recurse
+
+    - name: Debug
+      if: startsWith(matrix.job.os, 'windows')
+      shell: bash
+      env:
+        VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      run: |
+        case "${{ matrix.job.target }}" in
+          i686-pc-windows-msvc) TRIPLET_DIR="$VCPKG_ROOT/installed/x86-windows-static" ;;
+          x86_64-pc-windows-msvc) TRIPLET_DIR="$VCPKG_ROOT/installed/x64-windows-static" ;;
+          *) TRIPLET_DIR="$VCPKG_ROOT/installed/x64-windows" ;;
+        esac
+        echo "Triplet dir: $TRIPLET_DIR"
+        echo "List include/opus:"
+        ls -la "$TRIPLET_DIR/include/opus" || true
+        test -f "$TRIPLET_DIR/include/opus/opus_multistream.h" && echo "OK: opus_multistream.h present" || (echo "ERROR: opus_multistream.h missing" && exit 1)
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@v1
