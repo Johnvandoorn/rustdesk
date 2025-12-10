@@ -1,0 +1,5 @@
+[server]
+rendezvous_server = "support.cadware.nl:21116"
+api_server = "https://support.cadware.nl"
+relay_server = "support.cadware.nl:21117"
+key = "IHYKHWHZdtXZBEYxxUXZQOWXl7KgSFBf8vCEEhi9y70="
