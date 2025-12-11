@@ -1,8 +1,10 @@
 name: Build RustDesk Windows x64 (Sciter) with custom server ID & key
 
-on: push:
+on: 
+  push:
   branches: [ main, master ] 
-paths: - '.github/workflows/' - '/.rs' - 'Cargo.' - 'libs/' - 'src/' pull_request: branches: [ main, master ]
+  paths: - 
+  '.github/workflows/' - '/.rs' - 'Cargo.' - 'libs/' - 'src/' pull_request: branches: [ main, master ]
 
 permissions: contents: read
 
